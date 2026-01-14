@@ -2,130 +2,103 @@
 <html lang="hi">
 <head>
 <meta charset="UTF-8">
-<title>🌸 Smart Live Browser Screen</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🌸 Live Browser View (Android Safe)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 
 <style>
 body{margin:0;font-family:Arial;background:#0f172a;color:#fff}
 header{padding:12px;background:#020617;text-align:center}
 button{padding:12px;margin:6px;border:none;border-radius:8px;font-size:16px}
 .primary{background:#22c55e}
-.secondary{background:#334155;color:#fff}
-textarea{width:100%;height:100px;margin-top:6px}
-#screenBox{position:relative;margin-top:10px}
-video{width:100%;background:#000}
-canvas{position:absolute;top:0;left:0}
-.status{text-align:center;font-size:14px;color:#94a3b8}
+textarea{width:100%;height:90px;margin-top:6px}
+video{width:100%;background:#000;margin-top:10px}
+.status{text-align:center;color:#94a3b8;font-size:14px}
 </style>
 </head>
 
 <body>
 
 <header>
-  <h3>🌸 Smart Live Browser Screen</h3>
-  <div class="status" id="status">Step 1: Start Screen Share</div>
+  <h3>🌸 Live Browser View</h3>
+  <div class="status" id="status">Ready</div>
 </header>
 
 <div style="padding:10px">
 
-<h4>👨‍🏫 Teacher</h4>
-<button class="primary" onclick="startShare()">📤 Start Screen Share</button>
-<textarea id="offerBox" placeholder="🔑 Offer code (auto-generate hoga, isko viewer ko bhejo)"></textarea>
+<button class="primary" onclick="start()">Start Live View</button>
+<textarea id="offer" placeholder="Offer code (send this)"></textarea>
 
-<hr>
+<button onclick="connect()">Connect Viewer</button>
+<textarea id="answer" placeholder="Answer code (send back)"></textarea>
 
-<h4>👀 Viewer</h4>
-<button class="secondary" onclick="createAnswer()">📥 Connect Viewer</button>
-<textarea id="answerBox" placeholder="🔁 Answer code (teacher ko bhejo)"></textarea>
+<video id="video" autoplay playsinline></video>
 
-</div>
-
-<div id="screenBox">
-  <video id="video" autoplay playsinline></video>
-  <canvas id="canvas"></canvas>
 </div>
 
 <script>
-/* ======================
-   WEBRTC CORE
-====================== */
+const pc = new RTCPeerConnection();
+const video = document.getElementById("video");
+const status = document.getElementById("status");
 
-let pc = new RTCPeerConnection();
-let video = document.getElementById("video");
-let status = document.getElementById("status");
-
-/* जब remote stream आए */
 pc.ontrack = e => {
   video.srcObject = e.streams[0];
-  status.innerText = "✅ Connected – Live Screen";
+  status.innerText = "✅ Connected";
 };
 
-/* ======================
-   TEACHER: START SHARE
-====================== */
+async function start(){
+  status.innerText = "Preparing live view…";
 
-async function startShare(){
-  status.innerText = "Sharing screen… Please allow permission";
+  let stream;
 
-  const stream = await navigator.mediaDevices.getDisplayMedia({
-    video:true, audio:false
-  });
+  if (/Android/i.test(navigator.userAgent)) {
+    // ✅ ANDROID SAFE MODE (tab-only view)
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment" }, audio:false
+    });
+    status.innerText = "Android mode: Browser view sharing";
+  } else {
+    // ✅ PC FULL SCREEN
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video:true, audio:false
+    });
+    status.innerText = "PC mode: Full screen sharing";
+  }
 
-  stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
+  stream.getTracks().forEach(t => pc.addTrack(t, stream));
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
 
-  // 🔑 ICE complete होने का wait
-  pc.onicegatheringstatechange = () => {
-    if (pc.iceGatheringState === "complete") {
-      document.getElementById("offerBox").value =
+  pc.onicegatheringstatechange = ()=>{
+    if(pc.iceGatheringState==="complete"){
+      offer.value = JSON.stringify(pc.localDescription);
+      document.getElementById("offer").value =
         JSON.stringify(pc.localDescription);
-      status.innerText = "✅ Offer generated – Send it to viewer";
+      status.innerText = "Offer ready – send it";
     }
   };
 }
 
-/* ======================
-   VIEWER: CREATE ANSWER
-====================== */
+async function connect(){
+  const offerText = document.getElementById("offer").value;
+  if(!offerText){ alert("Paste offer first"); return; }
 
-async function createAnswer(){
-  status.innerText = "Connecting to teacher…";
-
-  const offerText = document.getElementById("offerBox").value;
-  if(!offerText){
-    alert("Offer code paste karo pehle");
-    return;
-  }
-
-  const offer = JSON.parse(offerText);
-  await pc.setRemoteDescription(offer);
-
+  await pc.setRemoteDescription(JSON.parse(offerText));
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
 
-  pc.onicegatheringstatechange = () => {
-    if (pc.iceGatheringState === "complete") {
-      document.getElementById("answerBox").value =
+  pc.onicegatheringstatechange = ()=>{
+    if(pc.iceGatheringState==="complete"){
+      document.getElementById("answer").value =
         JSON.stringify(pc.localDescription);
-      status.innerText = "✅ Answer ready – Send back to teacher";
+      status.innerText = "Answer ready – send back";
     }
   };
 }
 
-/* ======================
-   TEACHER: ACCEPT ANSWER
-====================== */
-
-document.getElementById("answerBox")
-.addEventListener("change", async ()=>{
-  const answerText = document.getElementById("answerBox").value;
-  if(!answerText) return;
-
-  const answer = JSON.parse(answerText);
-  await pc.setRemoteDescription(answer);
-  status.innerText = "⏳ Finalizing connection…";
+document.getElementById("answer").addEventListener("change", async ()=>{
+  await pc.setRemoteDescription(
+    JSON.parse(document.getElementById("answer").value)
+  );
 });
 </script>
 
