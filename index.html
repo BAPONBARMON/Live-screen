@@ -2,12 +2,8 @@
 <html lang="hi">
 <head>
 <meta charset="UTF-8">
-<title>Live Browser Connect</title>
+<title>Live Browser View</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-
-<!-- Firebase CDN -->
-<script src="https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js" type="module"></script>
-<script src="https://www.gstatic.com/firebasejs/12.7.0/firebase-database.js" type="module"></script>
 
 <style>
 body{
@@ -15,9 +11,8 @@ body{
   font-family:Arial;
   background:#0f172a;
   color:#fff;
-  padding:15px;
+  padding:12px;
 }
-h2{margin-top:0}
 .user{
   background:#1e293b;
   padding:10px;
@@ -25,28 +20,36 @@ h2{margin-top:0}
   border-radius:6px;
 }
 button{
+  padding:8px 12px;
   margin-top:6px;
-  padding:6px 12px;
   border:none;
   border-radius:5px;
   background:#22c55e;
-  color:#000;
+}
+video{
+  width:100%;
+  background:#000;
+  margin-top:10px;
+  display:none;
 }
 </style>
 </head>
 
 <body>
 
-<h2>🟢 Online Users</h2>
+<h3>🟢 Online Users</h3>
 <div id="me"></div>
 <hr>
-<div id="users">Loading...</div>
+<div id="users"></div>
+
+<video id="screen" autoplay playsinline></video>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-import { getDatabase, ref, set, onValue, onDisconnect, remove } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-database.js";
+import { getDatabase, ref, set, onValue, onDisconnect, remove } 
+from "https://www.gstatic.com/firebasejs/12.7.0/firebase-database.js";
 
-/* 🔥 YOUR FIREBASE CONFIG */
+/* 🔥 Firebase config */
 const firebaseConfig = {
   apiKey: "AIzaSyCm4osVK6qMHItwvwcThrjJf3DRJFBDNN8",
   authDomain: "live-screen-share.firebaseapp.com",
@@ -60,58 +63,101 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-/* 👤 simple user id */
+/* 👤 User */
 const myId = "user_" + Math.floor(Math.random()*10000);
-document.getElementById("me").innerText =
-  "You are online as: " + myId;
+document.getElementById("me").innerText = "You: " + myId;
 
-/* 🟢 mark online */
-const myRef = ref(db, "users/" + myId);
-set(myRef, true);
+/* ONLINE */
+const myRef = ref(db,"users/"+myId);
+set(myRef,true);
 onDisconnect(myRef).remove();
 
-/* 👥 show online users */
-const usersDiv = document.getElementById("users");
+/* WebRTC */
+let pc;
+const video = document.getElementById("screen");
 
-onValue(ref(db, "users"), snap => {
-  usersDiv.innerHTML = "";
-  snap.forEach(child => {
-    const uid = child.key;
-    if(uid === myId) return;
-
-    const div = document.createElement("div");
-    div.className = "user";
-    div.innerHTML = `
-      ${uid}<br>
-      <button onclick="sendRequest('${uid}')">Request</button>
-    `;
-    usersDiv.appendChild(div);
+/* Show users */
+onValue(ref(db,"users"), snap=>{
+  const div=document.getElementById("users");
+  div.innerHTML="";
+  snap.forEach(c=>{
+    if(c.key===myId) return;
+    div.innerHTML+=`
+      <div class="user">
+        ${c.key}<br>
+        <button onclick="request('${c.key}')">Request View</button>
+      </div>`;
   });
+});
 
-  if(usersDiv.innerHTML === ""){
-    usersDiv.innerHTML = "No other users online";
+/* Send request */
+window.request=function(to){
+  set(ref(db,"requests/"+to),{from:myId});
+}
+
+/* Receive request */
+onValue(ref(db,"requests/"+myId), async snap=>{
+  if(!snap.exists()) return;
+  const from=snap.val().from;
+  remove(ref(db,"requests/"+myId));
+
+  if(confirm(from+" wants to view your browser. Accept?")){
+    startShare(from);
   }
 });
 
-/* 📩 send request */
-window.sendRequest = function(to){
-  set(ref(db, "requests/" + to), {
-    from: myId
-  });
-  alert("Request sent to " + to);
+/* Start screen share */
+async function startShare(viewer){
+  pc = new RTCPeerConnection();
+  pc.onicecandidate = e=>{
+    if(e.candidate){
+      set(ref(db,"candidates/"+viewer),e.candidate);
+    }
+  };
+
+  const stream = 
+    /Android/i.test(navigator.userAgent)
+    ? await navigator.mediaDevices.getUserMedia({video:true})
+    : await navigator.mediaDevices.getDisplayMedia({video:true});
+
+  stream.getTracks().forEach(t=>pc.addTrack(t,stream));
+
+  const offer=await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  set(ref(db,"offers/"+viewer),offer);
 }
 
-/* 📥 receive request */
-onValue(ref(db, "requests/" + myId), snap => {
+/* Viewer receives offer */
+onValue(ref(db,"offers/"+myId), async snap=>{
   if(!snap.exists()) return;
+  remove(ref(db,"offers/"+myId));
 
-  const from = snap.val().from;
-  const ok = confirm(from + " wants to connect. Accept?");
-  remove(ref(db, "requests/" + myId));
+  pc = new RTCPeerConnection();
+  pc.ontrack = e=>{
+    video.srcObject=e.streams[0];
+    video.style.display="block";
+  };
+  pc.onicecandidate = e=>{
+    if(e.candidate){
+      set(ref(db,"candidates/"+snap.val().from),e.candidate);
+    }
+  };
 
-  if(ok){
-    alert("Connection accepted ✅\n(Screen share next step)");
-  }
+  await pc.setRemoteDescription(snap.val());
+  const answer=await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  set(ref(db,"answers/"+snap.val().from),answer);
+});
+
+/* Sharer receives answer */
+onValue(ref(db,"answers/"+myId), async snap=>{
+  if(!snap.exists()) return;
+  await pc.setRemoteDescription(snap.val());
+});
+
+/* ICE */
+onValue(ref(db,"candidates/"+myId), snap=>{
+  if(snap.exists()) pc.addIceCandidate(snap.val());
 });
 </script>
 
