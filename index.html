@@ -2,103 +2,116 @@
 <html lang="hi">
 <head>
 <meta charset="UTF-8">
-<title>🌸 Live Browser View (Android Safe)</title>
+<title>Live Browser Connect</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
+<!-- Firebase CDN -->
+<script src="https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js" type="module"></script>
+<script src="https://www.gstatic.com/firebasejs/12.7.0/firebase-database.js" type="module"></script>
+
 <style>
-body{margin:0;font-family:Arial;background:#0f172a;color:#fff}
-header{padding:12px;background:#020617;text-align:center}
-button{padding:12px;margin:6px;border:none;border-radius:8px;font-size:16px}
-.primary{background:#22c55e}
-textarea{width:100%;height:90px;margin-top:6px}
-video{width:100%;background:#000;margin-top:10px}
-.status{text-align:center;color:#94a3b8;font-size:14px}
+body{
+  margin:0;
+  font-family:Arial;
+  background:#0f172a;
+  color:#fff;
+  padding:15px;
+}
+h2{margin-top:0}
+.user{
+  background:#1e293b;
+  padding:10px;
+  margin-bottom:8px;
+  border-radius:6px;
+}
+button{
+  margin-top:6px;
+  padding:6px 12px;
+  border:none;
+  border-radius:5px;
+  background:#22c55e;
+  color:#000;
+}
 </style>
 </head>
 
 <body>
 
-<header>
-  <h3>🌸 Live Browser View</h3>
-  <div class="status" id="status">Ready</div>
-</header>
+<h2>🟢 Online Users</h2>
+<div id="me"></div>
+<hr>
+<div id="users">Loading...</div>
 
-<div style="padding:10px">
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
+import { getDatabase, ref, set, onValue, onDisconnect, remove } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-database.js";
 
-<button class="primary" onclick="start()">Start Live View</button>
-<textarea id="offer" placeholder="Offer code (send this)"></textarea>
-
-<button onclick="connect()">Connect Viewer</button>
-<textarea id="answer" placeholder="Answer code (send back)"></textarea>
-
-<video id="video" autoplay playsinline></video>
-
-</div>
-
-<script>
-const pc = new RTCPeerConnection();
-const video = document.getElementById("video");
-const status = document.getElementById("status");
-
-pc.ontrack = e => {
-  video.srcObject = e.streams[0];
-  status.innerText = "✅ Connected";
+/* 🔥 YOUR FIREBASE CONFIG */
+const firebaseConfig = {
+  apiKey: "AIzaSyCm4osVK6qMHItwvwcThrjJf3DRJFBDNN8",
+  authDomain: "live-screen-share.firebaseapp.com",
+  databaseURL: "https://live-screen-share-default-rtdb.firebaseio.com",
+  projectId: "live-screen-share",
+  storageBucket: "live-screen-share.firebasestorage.app",
+  messagingSenderId: "249637860812",
+  appId: "1:249637860812:web:f59fe87ee7417cddd8d969"
 };
 
-async function start(){
-  status.innerText = "Preparing live view…";
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
 
-  let stream;
+/* 👤 simple user id */
+const myId = "user_" + Math.floor(Math.random()*10000);
+document.getElementById("me").innerText =
+  "You are online as: " + myId;
 
-  if (/Android/i.test(navigator.userAgent)) {
-    // ✅ ANDROID SAFE MODE (tab-only view)
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" }, audio:false
-    });
-    status.innerText = "Android mode: Browser view sharing";
-  } else {
-    // ✅ PC FULL SCREEN
-    stream = await navigator.mediaDevices.getDisplayMedia({
-      video:true, audio:false
-    });
-    status.innerText = "PC mode: Full screen sharing";
+/* 🟢 mark online */
+const myRef = ref(db, "users/" + myId);
+set(myRef, true);
+onDisconnect(myRef).remove();
+
+/* 👥 show online users */
+const usersDiv = document.getElementById("users");
+
+onValue(ref(db, "users"), snap => {
+  usersDiv.innerHTML = "";
+  snap.forEach(child => {
+    const uid = child.key;
+    if(uid === myId) return;
+
+    const div = document.createElement("div");
+    div.className = "user";
+    div.innerHTML = `
+      ${uid}<br>
+      <button onclick="sendRequest('${uid}')">Request</button>
+    `;
+    usersDiv.appendChild(div);
+  });
+
+  if(usersDiv.innerHTML === ""){
+    usersDiv.innerHTML = "No other users online";
   }
+});
 
-  stream.getTracks().forEach(t => pc.addTrack(t, stream));
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-
-  pc.onicegatheringstatechange = ()=>{
-    if(pc.iceGatheringState==="complete"){
-      offer.value = JSON.stringify(pc.localDescription);
-      document.getElementById("offer").value =
-        JSON.stringify(pc.localDescription);
-      status.innerText = "Offer ready – send it";
-    }
-  };
+/* 📩 send request */
+window.sendRequest = function(to){
+  set(ref(db, "requests/" + to), {
+    from: myId
+  });
+  alert("Request sent to " + to);
 }
 
-async function connect(){
-  const offerText = document.getElementById("offer").value;
-  if(!offerText){ alert("Paste offer first"); return; }
+/* 📥 receive request */
+onValue(ref(db, "requests/" + myId), snap => {
+  if(!snap.exists()) return;
 
-  await pc.setRemoteDescription(JSON.parse(offerText));
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
+  const from = snap.val().from;
+  const ok = confirm(from + " wants to connect. Accept?");
+  remove(ref(db, "requests/" + myId));
 
-  pc.onicegatheringstatechange = ()=>{
-    if(pc.iceGatheringState==="complete"){
-      document.getElementById("answer").value =
-        JSON.stringify(pc.localDescription);
-      status.innerText = "Answer ready – send back";
-    }
-  };
-}
-
-document.getElementById("answer").addEventListener("change", async ()=>{
-  await pc.setRemoteDescription(
-    JSON.parse(document.getElementById("answer").value)
-  );
+  if(ok){
+    alert("Connection accepted ✅\n(Screen share next step)");
+  }
 });
 </script>
 
